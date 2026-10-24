@@ -1,0 +1,13 @@
+
+# Ficheiros do macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Chaves e ficheiros de configuração locais
+config.json
+.env
+
+# Ficheiros do Clasp / Node
+node_modules/
+.clasp.json
