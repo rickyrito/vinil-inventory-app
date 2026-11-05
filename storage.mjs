@@ -8,7 +8,23 @@ export async function openStore(account) {
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(request.error);
   });
+  const current = database;
+  current.onversionchange = () => current.close();
+  const owner = account.split('-api-')[0], key = 'vinil-databases-' + owner;
+  const known = JSON.parse(localStorage.getItem(key) || '[]');
+  localStorage.setItem(key, JSON.stringify([...new Set([...known, database.name])]));
 }
+export async function clearAccountStores(owner) {
+  database?.close(); database = null;
+  const key = 'vinil-databases-' + owner, names = JSON.parse(localStorage.getItem(key) || '[]');
+  for (const name of names.filter(n => n.startsWith('vinil-' + owner + '-api-'))) await new Promise((resolve, reject) => {
+    const request = indexedDB.deleteDatabase(name);
+    request.onsuccess = resolve; request.onerror = () => reject(request.error);
+    request.onblocked = () => reject(new Error('Fecha os outros separadores da aplicação para remover todas as cópias locais.'));
+  });
+  localStorage.removeItem(key);
+}
+export function closeStore() { database?.close(); database = null; }
 export function get(key) {
   return new Promise((resolve, reject) => {
     if (!database) return resolve(undefined);

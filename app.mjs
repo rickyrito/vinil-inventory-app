@@ -1,12 +1,14 @@
 import { emptyState, visibleRecords, filterRecords, enqueue, acknowledge, resolveConflict } from './core.mjs';
 import * as storage from './storage.mjs';
-import { api, signIn, signOut, bootstrap, configured, authenticated, previewMode } from './google.mjs';
+import { api, signIn, signOut, bootstrap, configured, authenticated, previewMode, availableCollections, selectedCollection, selectCollection, canImportLegacy, forgetSession } from './google.mjs';
 
 const $ = id => document.getElementById(id);
 const form = $('record-form');
 const grades = ['', 'Mint (M)', 'Near Mint (NM)', 'Very Good Plus (VG+)', 'Very Good (VG)', 'Good Plus (G+)', 'Good (G)', 'Fair (F)', 'Poor (P)'];
 let state = emptyState(), tab = 'Coleção', account = null, syncing = false, editing = null, photo = '', chosenCover = '';
 let conflictOperation = '', discovering = false, accountChanging = false;
+let collectionDraft = '', managingCollection = '';
+const canWrite = () => !!account?.collectionId && (authenticated() ? selectedCollection()?.canEdit === true : account.canEdit === true);
 const money = n => new Intl.NumberFormat('pt-PT', { style: 'currency', currency: 'EUR' }).format(n);
 const date = value => value ? new Date(value).toLocaleDateString('pt-PT') : '—';
 const error = e => e?.message || String(e);
@@ -26,6 +28,7 @@ const coverJobs = new Map();
 let imageJobs = Promise.resolve();
 async function loadCover(img, d) {
   const owner = account?.id;
+  const scope = account?.collectionId;
   const key = photoKey(d);
   try {
     if (d.fotoBase64) { img.src = d.fotoBase64; return; }
@@ -36,7 +39,7 @@ async function loadCover(img, d) {
     if (!coverJobs.has(key)) {
       // Serializar pedidos de imagens para respeitar os limites da API Google.
       const job = imageJobs.then(async () => {
-        if (!authenticated() || account?.id !== owner || accountChanging) return '';
+        if (!authenticated() || account?.id !== owner || account?.collectionId !== scope || accountChanging) return '';
         if (d.foto) return api('photo', d.id);
         if (!safeImage(d.capa)) return '';
         const r = await fetch(d.capa, { credentials: 'omit' });
@@ -45,14 +48,14 @@ async function loadCover(img, d) {
         if (blob.size > 3500000) return '';
         return new Promise((resolve, reject) => { const reader = new FileReader(); reader.onload = () => resolve(reader.result); reader.onerror = reject; reader.readAsDataURL(blob); });
       }).then(async data => {
-        if (data && safeImage(data) && account?.id === owner && !accountChanging) await storage.set(key, data);
+        if (data && safeImage(data) && account?.id === owner && account?.collectionId === scope && !accountChanging) await storage.set(key, data);
         return data;
       }).catch(() => '');
       coverJobs.set(key, job);
       imageJobs = job;
     }
     const data = await coverJobs.get(key);
-    if (data && img.isConnected && account?.id === owner) img.src = data;
+    if (data && img.isConnected && account?.id === owner && account?.collectionId === scope) img.src = data;
   } catch { /* Uma capa indisponível não impede a consulta do disco. */ }
 }
 const observer = new IntersectionObserver(entries => {
@@ -76,6 +79,18 @@ function options(id, values, label) {
   if ([...select.options].some(o => o.value === previous)) select.value = previous;
 }
 function render() {
+  const active = selectedCollection();
+  $('collection-picker').replaceChildren(new Option(account?.collectionId && !authenticated() ? account.collectionName || 'Coleção offline' : 'Escolher coleção', ''));
+  for (const c of availableCollections()) {
+    const option = new Option(c.name + (c.shared ? ' · partilhada' : '') + (c.status !== 'ready' ? ' · criação por concluir' : ''), c.id);
+    option.disabled = c.status !== 'ready'; $('collection-picker').add(option);
+  }
+  $('collection-picker').value = active?.id || '';
+  $('collection-picker').disabled = !authenticated() || previewMode() || syncing || accountChanging || discovering || $('editor').open;
+  $('collection-role').textContent = ({ owner: 'Proprietário', writer: 'Pode editar', reader: 'Só consulta' })[active?.role] || '';
+  $('new-collection').disabled = !authenticated() || previewMode() || syncing || accountChanging;
+  $('manage-collection').hidden = !active?.canShare || previewMode();
+  $('manage-collection').disabled = syncing || accountChanging;
   const records = visibleRecords(state);
   const collection = records.filter(d => d.lista === 'Coleção'), wishes = records.filter(d => d.lista === 'Wishlist');
   const loans = records.filter(d => d.emprestado), conflicts = records.filter(d => d.situacao === 'Conflito');
@@ -89,17 +104,18 @@ function render() {
   $('account-detail').textContent = account ? account.email : 'Ainda sem uma conta ligada.';
   $('logout').hidden = !account;
   $('config-status').textContent = previewMode() ? 'Esta publicação permite conhecer a interface. A entrada Google e o acesso à coleção ficam disponíveis quando o serviço de dados estiver ligado.' : configured() ? 'Ligação Google configurada no servidor. Entra com a tua conta para abrir a coleção.' : 'A ligação Google ainda precisa de ser configurada no servidor.';
-  for (const id of ['account', 'connect', 'empty-connect', 'add']) $(id).disabled = previewMode();
+  for (const id of ['account', 'connect', 'empty-connect']) $(id).disabled = previewMode();
+  $('add').disabled = previewMode() || !canWrite() || syncing || accountChanging;
   if (previewMode()) message('Pré-visualização no GitHub Pages. A autenticação Google, a coleção real e a gravação no Drive ainda não estão disponíveis nesta publicação.');
   $('network').textContent = navigator.onLine ? authenticated() ? 'Ligado ao Google' : 'Sem sessão Google' : 'Sem internet';
   $('network-dot').classList.toggle('offline', !navigator.onLine);
-  $('sync').disabled = syncing || !account;
+  $('sync').disabled = syncing || !account?.collectionId;
   $('sync-label').textContent = syncing ? 'A sincronizar…' : state.fila.length ? state.fila.length + ' pendente(s)' : state.atualizado ? 'Atualizado ' + date(state.atualizado) : 'Ainda sem sincronização';
   $('library').hidden = tab === 'Ligação'; $('settings').hidden = tab !== 'Ligação';
   $('breadcrumb').textContent = tab.toUpperCase();
   document.querySelectorAll('[data-tab]').forEach(b => { b.classList.toggle('active', b.dataset.tab === tab); b.setAttribute('aria-current', b.dataset.tab === tab ? 'page' : 'false'); });
   $('page-title').textContent = ({ 'Coleção': 'A tua coleção.', 'Wishlist': 'Os próximos discos.', 'Empréstimos': 'A música circula.', 'Conflitos': 'Rever duplicados.' })[tab] || 'A tua coleção.';
-  $('subtitle').textContent = ({ 'Coleção': 'Um lugar para todos os teus discos.', 'Wishlist': 'Aqueles que ainda queres ouvir em casa.', 'Empréstimos': 'Sabe com quem está cada disco.', 'Conflitos': 'A mesma edição encontrada em mais de um registo.' })[tab] || '';
+  $('subtitle').textContent = active ? active.name + (active.role === 'reader' ? ' · Partilhada para consulta' : '') : ({ 'Coleção': 'Um lugar para todos os teus discos.', 'Wishlist': 'Aqueles que ainda queres ouvir em casa.', 'Empréstimos': 'Sabe com quem está cada disco.', 'Conflitos': 'A mesma edição encontrada em mais de um registo.' })[tab] || '';
   options('genre', records.flatMap(d => String(d.generos || '').split(',').map(s => s.trim())), 'Todos os géneros');
   options('condition', records.map(d => d.estadoDisco), 'Todos os estados');
   const filtered = filterRecords(records, { tab, search: $('search').value, genre: $('genre').value, condition: $('condition').value, sort: $('sort').value });
@@ -115,7 +131,7 @@ function render() {
     $('grid').append(card);
   }
   $('empty').hidden = !!filtered.length;
-  $('empty-text').textContent = previewMode() ? 'A tua coleção real será apresentada depois de a ligação Google estar disponível.' : !account ? 'Liga a tua conta Google para abrir a coleção existente.' : !records.length ? 'Sincroniza a coleção ou adiciona o primeiro vinil.' : 'Não há discos para estes filtros. Experimenta outra pesquisa ou adiciona um vinil.';
+  $('empty-text').textContent = previewMode() ? 'Depois de o serviço Google estar ligado, cada pessoa poderá criar as suas coleções no Drive e partilhá-las por convite.' : !account ? 'Entra com Google para abrir as tuas coleções e as que partilharam contigo.' : !account.collectionId ? 'Cria a tua primeira coleção ou entra com o email que recebeu um convite.' : !records.length ? active?.role === 'reader' ? 'Esta coleção ainda não tem discos.' : 'Adiciona o primeiro vinil a esta coleção.' : 'Não há discos para estes filtros. Experimenta outra pesquisa.';
   $('empty-connect').hidden = !!account || previewMode();
   $('pending').hidden = !state.fila.length; $('pending-list').replaceChildren();
   for (const op of state.fila) {
@@ -135,13 +151,14 @@ async function connect() {
   finally { accountChanging = false; }
 }
 async function sync() {
-  if (syncing || !account) return;
+  if (syncing || !account?.collectionId) return;
   if (!authenticated()) return message('Entra com Google para sincronizar. A cópia local continua disponível.');
   syncing = true; render();
   try {
     await storage.locked(async () => {
       state = await storage.readState();
       for (const op of [...state.fila]) {
+        if (!canWrite()) break;
         if (op.erro && Object.hasOwn(op, 'servidor')) continue;
         const response = await api('save', op);
         state = acknowledge(state, op, response);
@@ -156,6 +173,7 @@ async function sync() {
   finally { syncing = false; render(); }
 }
 function openEditor(d = null) {
+  if (!canWrite()) return message('Escolhe uma coleção tua ou uma partilhada com permissão de edição.');
   if (!account) { message('Liga primeiro a tua conta Google para abrir ou adicionar discos.'); return; }
   if (d?.pendente) { message('Sincroniza as alterações deste disco antes de o voltares a editar.'); return; }
   editing = d; photo = ''; chosenCover = d?.capa || ''; discovering = false;
@@ -189,7 +207,7 @@ function showDetail(d) {
   if (d.notas) root.append(node('h3', 'Notas'), node('p', d.notas, 'prewrap'));
   if (d.faixas) root.append(node('h3', 'Faixas'), node('p', d.faixas, 'prewrap'));
   const actions = node('div', undefined, 'actions');
-  actions.append(button('Editar / gerir empréstimo', () => { $('detail').close(); openEditor(d); }, 'primary'));
+  if (canWrite()) actions.append(button('Editar / gerir empréstimo', () => { $('detail').close(); openEditor(d); }, 'primary'));
   if (/^https:\/\/www\.discogs\.com\/release\/\d+$/.test(d.url)) {
     const a = node('a', 'Abrir Discogs ↗', 'secondary'); a.href = d.url; a.target = '_blank'; a.rel = 'noopener noreferrer'; actions.append(a);
   }
@@ -197,6 +215,7 @@ function showDetail(d) {
 }
 async function save(event) {
   event.preventDefault(); if (syncing || discovering) return;
+  if (!canWrite()) { $('form-status').textContent = 'Já não tens permissão para editar esta coleção. Podes consultar ou exportar as alterações pendentes.'; return; }
   const disco = Object.fromEntries(new FormData(form));
   disco.capa = chosenCover;
   if (photo) disco.fotoBase64 = photo;
@@ -306,7 +325,7 @@ async function logout() {
   accountChanging = true;
   try {
     await imageJobs;
-    await storage.locked(() => storage.clearStore());
+    await storage.locked(() => storage.clearAccountStores(account.id));
     await signOut(); account = null; localStorage.removeItem('vinil-account'); state = emptyState(); coverJobs.clear();
     message('Sessão terminada e cópia local removida.'); render();
   } catch (e) { message(error(e)); }
@@ -368,18 +387,102 @@ window.addEventListener('focus', async () => {
 });
 async function refreshSession() {
   const session = await bootstrap();
+  if (session.preview) { account = null; state = emptyState(); return; }
   if (!session.account) return;
-  if (account?.id === session.account.id && account.collectionId === session.collectionId) return;
+  if (account?.id === session.account.id && account.collectionId === session.collectionId) {
+    account.canEdit = selectedCollection()?.canEdit === true;
+    localStorage.setItem('vinil-account', JSON.stringify(account)); return;
+  }
   accountChanging = true;
   try {
     await imageJobs;
     for (const dialog of document.querySelectorAll('dialog[open]')) dialog.close();
-    account = { ...session.account, collectionId: session.collectionId };
-    await storage.openStore(account.id + '-api-' + account.collectionId);
-    state = await storage.readState(); coverJobs.clear();
+    const selected = selectedCollection();
+    account = { ...session.account, collectionId: session.collectionId || '', collectionName: selected?.name || '', canEdit: selected?.canEdit === true };
+    if (account.collectionId) { await storage.openStore(account.id + '-api-' + account.collectionId); state = await storage.readState(); }
+    else { storage.closeStore(); state = emptyState(); }
+    coverJobs.clear();
     localStorage.setItem('vinil-account', JSON.stringify(account));
   } finally { accountChanging = false; }
 }
+async function switchCollection(id) {
+  if (syncing || accountChanging || discovering || $('editor').open) { render(); return message('Conclui a operação atual antes de mudar de coleção.'); }
+  accountChanging = true;
+  try {
+    await imageJobs; selectCollection(id);
+    const selected = selectedCollection();
+    account = { ...account, collectionId: id, collectionName: selected.name, canEdit: selected.canEdit };
+    for (const dialog of document.querySelectorAll('dialog[open]')) dialog.close();
+    await storage.openStore(account.id + '-api-' + id); state = await storage.readState(); coverJobs.clear();
+    localStorage.setItem('vinil-account', JSON.stringify(account)); message('');
+  } catch (e) { message(error(e)); }
+  finally { accountChanging = false; render(); }
+  if (authenticated()) await sync();
+}
+function openCollections() {
+  if (!authenticated()) return;
+  collectionDraft = crypto.randomUUID(); $('collection-name').value = ''; $('collection-status').textContent = '';
+  $('import-legacy').hidden = !canImportLegacy(); $('unfinished-collections').replaceChildren();
+  for (const c of availableCollections().filter(c => c.role === 'owner' && c.status !== 'ready')) {
+    $('unfinished-collections').append(button('Retomar criação: ' + c.name, () => { collectionDraft = c.id; $('collection-name').value = c.name; }));
+  }
+  $('collection-dialog').showModal();
+}
+async function createCollection(event) {
+  event.preventDefault(); $('create-collection').disabled = true;
+  $('collection-status').textContent = 'A criar a pasta e a folha no teu Drive…';
+  try {
+    const result = await api('createCollection', { id: collectionDraft, name: $('collection-name').value.trim() });
+    await bootstrap(); await switchCollection(result.id); $('collection-dialog').close();
+  } catch (e) { $('collection-status').textContent = error(e) + ' Podes tentar novamente para retomar a criação.'; }
+  finally { $('create-collection').disabled = false; }
+}
+function renderMembers(result) {
+  $('sharing-members').replaceChildren(node('p', 'Proprietário: ' + result.ownerEmail, 'muted'));
+  if (!result.members.length) $('sharing-members').append(node('p', 'Esta coleção é privada. Ainda não convidaste ninguém.', 'muted'));
+  for (const member of result.members) {
+    const row = node('div', undefined, 'member-row'), text = node('p', member.email);
+    text.append(node('small', (member.role === 'writer' ? 'Pode editar' : 'Pode consultar') + (member.state !== 'active' ? ' · confirmação pendente no Drive' : '')));
+    const actions = node('div', undefined, 'actions');
+    if (member.state !== 'revoking') actions.append(button('Alterar', () => { $('invite-email').value = member.email; $('invite-role').value = member.role; $('invite-email').focus(); }));
+    actions.append(button(member.state === 'revoking' ? 'Tentar remover novamente' : 'Remover acesso', () => revokeInvite(member.email), 'subtle'));
+    row.append(text, actions); $('sharing-members').append(row);
+  }
+}
+async function openSharing() {
+  if (!selectedCollection()?.canShare) return;
+  managingCollection = selectedCollection().id;
+  $('sharing-name').textContent = selectedCollection().name; $('sharing-status').textContent = 'A carregar partilhas…';
+  $('sharing-form').reset(); $('sharing-members').replaceChildren(); $('sharing-dialog').showModal();
+  try { renderMembers(await api('members', { collectionId: managingCollection })); $('sharing-status').textContent = ''; }
+  catch (e) { $('sharing-status').textContent = error(e); }
+}
+async function shareCollection(event) {
+  event.preventDefault(); $('invite-submit').disabled = true; $('sharing-status').textContent = 'A confirmar a partilha no Drive…';
+  try {
+    renderMembers(await api('share', { collectionId: managingCollection, email: $('invite-email').value.trim(), role: $('invite-role').value }));
+    $('sharing-status').textContent = 'Partilha confirmada. A coleção aparece quando a pessoa entrar com esse email.';
+    $('sharing-form').reset();
+  } catch (e) { $('sharing-status').textContent = error(e); }
+  finally { $('invite-submit').disabled = false; }
+}
+async function revokeInvite(email) {
+  if (!confirm('Remover o acesso de ' + email + ' a esta coleção e à respetiva pasta no Drive?')) return;
+  try { renderMembers(await api('revoke', { collectionId: managingCollection, email })); $('sharing-status').textContent = 'Acesso removido. Cópias que a pessoa já tenha descarregado não são apagadas.'; }
+  catch (e) { $('sharing-status').textContent = error(e); try { renderMembers(await api('members', { collectionId: managingCollection })); } catch {} }
+}
+$('new-collection').onclick = openCollections; $('collection-form').onsubmit = createCollection;
+$('collection-picker').onchange = event => switchCollection(event.target.value);
+$('manage-collection').onclick = openSharing; $('sharing-form').onsubmit = shareCollection;
+$('import-legacy').onclick = async () => {
+  $('import-legacy').disabled = true;
+  try { const result = await api('importLegacy'); await bootstrap(); await switchCollection(result.id); $('collection-dialog').close(); }
+  catch (e) { $('collection-status').textContent = error(e); }
+  finally { $('import-legacy').disabled = false; }
+};
+window.addEventListener('storage', event => {
+  if (event.key === 'vinil-account' && !event.newValue) { forgetSession(); storage.closeStore(); account = null; state = emptyState(); coverJobs.clear(); render(); }
+});
 try {
   account = JSON.parse(localStorage.getItem('vinil-account') || 'null');
   if (account?.id && account.collectionId && !localStorage.getItem('vinil-logout-pending')) {

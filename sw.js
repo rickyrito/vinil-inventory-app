@@ -1,5 +1,5 @@
 const CACHE_PREFIX = 'vinil-' + new URL(self.registration.scope).pathname + '-shell-';
-const VERSION = CACHE_PREFIX + 'v4';
+const VERSION = CACHE_PREFIX + 'v5';
 const SHELL = ['./', './index.html', './styles.css', './app.mjs', './core.mjs', './storage.mjs', './google.mjs',
   './hosting.json', './manifest.webmanifest', './icon-192.png', './icon-512.png', './apple-touch-icon.png', './vendor/zxing.min.js'];
 self.addEventListener('install', event => {
