@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="pt-PT">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#f6f3ec">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Vinil">
+  <meta name="description" content="A tua coleção de vinil, ligada ao Google Drive.">
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="apple-touch-icon" href="./apple-touch-icon.png">
+  <link rel="icon" type="image/png" href="./icon-192.png">
+  <link rel="stylesheet" href="./styles.css">
+  <script src="./vendor/zxing.min.js" defer></script>
+  <script src="./app.mjs" type="module"></script>
+  <title>Vinil · A minha coleção</title>
+</head>
+<body>
+  <aside class="sidebar">
+    <a class="brand" href="./" aria-label="Vinil, início"><span class="disc-logo" aria-hidden="true"></span>vinil<span class="brand-dot">.</span></a>
+    <p class="eyebrow">O TEU ARQUIVO MUSICAL</p>
+    <nav aria-label="Navegação principal">
+      <button data-tab="Coleção" class="nav active"><span aria-hidden="true">▦</span> Coleção <b id="count-collection">0</b></button>
+      <button data-tab="Wishlist" class="nav"><span aria-hidden="true">♡</span> Desejos <b id="count-wishlist">0</b></button>
+      <button data-tab="Empréstimos" class="nav"><span aria-hidden="true">⇄</span> Empréstimos <b id="count-loans">0</b></button>
+      <button data-tab="Conflitos" class="nav"><span aria-hidden="true">◇</span> Duplicados <b id="count-conflicts">0</b></button>
+      <button data-tab="Ligação" class="nav"><span aria-hidden="true">⚙</span> Ligação</button>
+    </nav>
+    <div class="sidebar-foot"><span class="status-dot" id="network-dot"></span><span id="network">A iniciar…</span><small>Google Sheets + Drive</small></div>
+  </aside>
+  <main>
+    <header class="topbar"><span>A MINHA COLEÇÃO / <span id="breadcrumb">COLEÇÃO</span></span><button id="account" class="subtle">Entrar com Google ↗</button></header>
+    <div id="message" role="status" class="notice" hidden></div>
+    <section id="library">
+      <div class="page-heading"><div><p class="eyebrow">CADA DISCO TEM UMA HISTÓRIA</p><h1 id="page-title">A tua coleção.</h1><p id="subtitle">Um lugar para todos os teus discos.</p></div><button id="add" class="primary">＋ Adicionar vinil</button></div>
+      <div class="stats"><div><span>NA COLEÇÃO</span><strong id="stat-total">0</strong></div><div><span>NA LISTA DE DESEJOS</span><strong id="stat-wish">0</strong></div><div><span>EMPRESTADOS</span><strong id="stat-loans">0</strong></div><div><span>VALOR MÍNIMO DISCOGS</span><strong id="stat-value">—</strong><small>Referência de mercado</small></div></div>
+      <div class="toolbar"><label class="search"><span aria-hidden="true">⌕</span><input id="search" type="search" placeholder="Pesquisar artista, álbum, código…" aria-label="Pesquisar coleção"></label><select id="genre" aria-label="Filtrar por género"><option value="">Todos os géneros</option></select><select id="condition" aria-label="Filtrar por estado"><option value="">Todos os estados</option></select><select id="sort" aria-label="Ordenar discos"><option value="artist">Artista A–Z</option><option value="title">Título A–Z</option><option value="year">Mais recentes (ano)</option></select></div>
+      <div class="results-heading"><span id="results-count">0 discos</span><div><span id="sync-label">Ainda sem sincronização</span><button id="sync" class="subtle">↻ Sincronizar</button></div></div>
+      <div id="grid" class="grid"></div>
+      <div id="empty" class="empty"><span class="empty-disc" aria-hidden="true">◎</span><h2>A próxima história começa aqui.</h2><p id="empty-text">Liga a tua conta Google para abrir a coleção existente.</p><button id="empty-connect" class="primary">Ligar a minha coleção ↗</button></div>
+      <section id="pending" class="pending" hidden><h2>Alterações pendentes</h2><p>Ficam guardadas neste dispositivo até serem confirmadas no Google.</p><div id="pending-list"></div><button id="export" class="subtle">Exportar cópia das alterações</button></section>
+    </section>
+    <section id="settings" hidden>
+      <div class="page-heading"><div><p class="eyebrow">SEMPRE CONTIGO</p><h1>A tua coleção, ligada.</h1><p>Os teus dados continuam no Google Sheets e no Drive.</p></div></div>
+      <div class="settings-grid"><article class="panel"><h2>Conta Google</h2><p id="account-detail">Ainda sem uma conta ligada.</p><button id="connect" class="primary">Entrar com Google</button><button id="logout" class="subtle" hidden>Sair e remover os dados deste dispositivo</button><p class="muted">A sessão Google pode expirar. A consulta offline continua disponível até saíres da app.</p></article>
+      <article class="panel"><h2>No browser ou no iPhone</h2><p>Abre o endereço da app no browser do computador ou do telemóvel e entra com a tua conta Google. A instalação é opcional.</p><p>Para teres um ícone no iPhone:</p><ol><li>Abre o endereço da app no <strong>Safari</strong>.</li><li>Toca em <strong>Partilhar</strong>.</li><li>Escolhe <strong>Adicionar ao ecrã principal</strong>.</li></ol><p class="muted">É a mesma aplicação, ligada à mesma coleção. Sincroniza uma vez com internet antes de a usares offline. As capas ficam disponíveis à medida que são consultadas.</p></article>
+      <article class="panel"><h2>Sem internet</h2><p>Podes consultar a coleção sincronizada, pesquisar e guardar alterações pendentes. A pesquisa Discogs e a identificação de capas precisam de internet.</p><p>Ao regressares à app com internet, a sincronização retoma se a sessão Google continuar válida.</p></article>
+      <article class="panel"><h2>Estado da ligação</h2><p id="config-status"></p><p class="muted">Os dados e fotografias são guardados diretamente no Google Sheets e no Drive. A sessão Google e as chaves dos serviços são geridas pelo servidor.</p></article></div>
+    </section>
+    <footer>FEITO PARA OUVIR. ORGANIZADO PARA ENCONTRAR.<span>33⅓ RPM · VINIL</span></footer>
+  </main>
+  <dialog id="editor"><form id="record-form">
+    <div class="dialog-heading"><div><p class="eyebrow">MAIS UM PARA A HISTÓRIA</p><h2 id="editor-title">Adicionar vinil</h2></div><button type="button" class="close" data-close="editor" aria-label="Fechar">×</button></div>
+    <section class="discovery" id="discovery"><label>Procurar no Discogs<input id="discogs-query" placeholder="Artista e álbum, ou código de barras"></label><div class="actions"><button type="button" id="discogs-search" class="secondary">Pesquisar Discogs</button><label class="secondary file-button">▥ Ler código<input id="barcode-photo" type="file" accept="image/*" capture="environment" hidden></label><label class="secondary file-button">◎ Identificar capa<input id="identify-photo" type="file" accept="image/*" capture="environment" hidden></label></div><p id="discovery-status" role="status"></p><div id="discogs-results"></div></section>
+    <p id="edit-warning" class="notice" hidden></p>
+    <div class="form-grid"><label>Artista<input name="artista" maxlength="2000"></label><label>Título *<input name="titulo" required maxlength="2000"></label><label>Ano<input name="ano" inputmode="numeric" pattern="[0-9]{0,4}" maxlength="4"></label><label>Lista<select name="lista"><option>Coleção</option><option value="Wishlist">Lista de desejos</option></select></label><label>Editora<input name="editora"></label><label>N.º de catálogo<input name="catno"></label><label>Formato<input name="formato" placeholder="Vinyl, LP"></label><label>País<input name="pais"></label><label>Código de barras<input name="barcode" inputmode="numeric" pattern="[0-9]*"></label><label>Estado do disco<select name="estadoDisco" class="grades"></select></label><label>Estado da capa<select name="estadoCapa" class="grades"></select></label><label>URL da edição Discogs<input name="url" type="url" pattern="https://www\.discogs\.com/release/[0-9]+" placeholder="https://www.discogs.com/release/…"></label></div>
+    <label>Notas<textarea name="notas" rows="3" maxlength="10000"></textarea></label>
+    <div class="photo-row"><label class="secondary file-button">＋ Foto do meu exemplar<input id="record-photo" type="file" accept="image/*" capture="environment" hidden></label><img id="photo-preview" alt="Fotografia escolhida" hidden><button id="remove-photo" type="button" class="subtle" hidden>Remover foto escolhida</button></div>
+    <fieldset><legend>Empréstimo</legend><p class="muted">Preenche o nome para registar um empréstimo. Limpa-o quando o disco for devolvido.</p><div class="form-grid"><label>Emprestado a<input name="emprestado" maxlength="200"></label><label>Data de empréstimo<input name="dataEmprestimo" type="date"></label><label>Devolver até<input name="devolver" type="date"></label></div></fieldset>
+    <p id="form-status" role="status"></p><div class="dialog-footer"><button type="button" class="secondary" data-close="editor">Cancelar</button><button type="submit" id="save" class="primary">Guardar vinil</button></div>
+  </form></dialog>
+  <dialog id="detail"><div id="detail-content"></div></dialog>
+  <dialog id="conflict"><div class="dialog-heading"><h2>Rever alterações</h2><button class="close" data-close="conflict" aria-label="Fechar">×</button></div><p>O disco foi alterado desde a última sincronização. Compara as duas versões antes de escolher.</p><div id="conflict-content"></div><div class="actions"><button id="use-server" class="secondary">Usar versão Google</button><button id="use-local" class="primary">Guardar as minhas alterações</button></div></dialog>
+</body></html>
